@@ -1,248 +1,213 @@
-import axios from 'axios';
+// Speech API with Gender-Specific Multi-Language Voices
 
-const HF_API_KEY = import.meta.env.VITE_HUGGINGFACE_API_KEY;
-const ELEVENLABS_API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
-
-// Track if avatar is currently speaking (to prevent feedback loop)
-let isAvatarSpeaking = false;
+let isCurrentlySpeaking = false;
 
 export function setAvatarSpeaking(speaking) {
-  isAvatarSpeaking = speaking;
+  isCurrentlySpeaking = speaking;
 }
 
+export function isAvatarSpeaking() {
+  return isCurrentlySpeaking;
+}
+
+// Alias for compatibility
 export function getAvatarSpeaking() {
-  return isAvatarSpeaking;
+  return isCurrentlySpeaking;
 }
 
-// Speech-to-Text using HuggingFace Whisper
-export async function speechToText(audioBlob) {
-  try {
-    const response = await axios.post(
-      'https://api-inference.huggingface.co/models/openai/whisper-large-v3',
-      audioBlob,
-      {
-        headers: {
-          'Authorization': `Bearer ${HF_API_KEY}`,
-          'Content-Type': 'audio/wav',
-        },
-      }
-    );
-    
-    return response.data.text;
-  } catch (error) {
-    console.error('Speech-to-Text Error:', error);
-    throw error;
-  }
-}
-
-// Text-to-Speech with avatar-specific voices
-export async function textToSpeech(text, useElevenLabs = false, avatarName = 'sarah') {
-  // Set flag that avatar is speaking
-  setAvatarSpeaking(true);
-
-  if (useElevenLabs && ELEVENLABS_API_KEY && ELEVENLABS_API_KEY !== 'your_elevenlabs_key_here') {
-    try {
-      // ElevenLabs voice IDs for different avatars
-      const elevenLabsVoices = {
-        sarah: '21m00Tcm4TlvDq8ikWAM', // Rachel - warm, professional female
-        daisy: 'EXAVITQu4vr4xnSDxMaL', // Bella - friendly, energetic female
-        john: 'VR6AewLTigWG4xSOukaG' // Arnold - confident male
-      };
-
-      const voiceId = elevenLabsVoices[avatarName] || elevenLabsVoices.sarah;
-
-      const response = await axios.post(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-        {
-          text: text,
-          model_id: 'eleven_monolingual_v1',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.5,
-            use_speaker_boost: true
-          },
-        },
-        {
-          headers: {
-            'Accept': 'audio/mpeg',
-            'xi-api-key': ELEVENLABS_API_KEY,
-            'Content-Type': 'application/json',
-          },
-          responseType: 'arraybuffer',
-        }
-      );
-      
-      const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      
-      return new Promise((resolve) => {
-        const audio = new Audio(audioUrl);
-        audio.onended = () => {
-          setAvatarSpeaking(false);
-          resolve(true);
-        };
-        audio.onerror = () => {
-          setAvatarSpeaking(false);
-          resolve(false);
-        };
-        audio.play();
-      });
-    } catch (error) {
-      console.error('ElevenLabs TTS Error:', error);
-      // Fallback to browser TTS
-      return browserTextToSpeech(text, avatarName);
-    }
-  } else {
-    // Use free browser TTS with avatar-specific voices
-    return browserTextToSpeech(text, avatarName);
-  }
-}
-
-// Browser-based TTS with avatar-specific voices
-function browserTextToSpeech(text, avatarName = 'sarah') {
-  return new Promise((resolve) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Get available voices
-    const voices = window.speechSynthesis.getVoices();
-    
-    // Configure voice based on avatar
-    if (avatarName === 'john') {
-      // Male voice configuration
-      utterance.rate = 0.95;
-      utterance.pitch = 0.85; // Lower pitch for male voice
-      utterance.volume = 1.0;
-      
-      // Try to find a male voice
-      const maleVoice = voices.find(voice => 
-        voice.name.toLowerCase().includes('male') ||
-        voice.name.toLowerCase().includes('david') ||
-        voice.name.toLowerCase().includes('james') ||
-        voice.name.toLowerCase().includes('george') ||
-        voice.name.toLowerCase().includes('daniel') ||
-        voice.name.toLowerCase().includes('mark') ||
-        voice.name.toLowerCase().includes('ryan')
-      );
-      
-      if (maleVoice) {
-        utterance.voice = maleVoice;
-      } else {
-        // Fallback to any male-sounding voice with lower pitch
-        const englishVoice = voices.find(voice => 
-          voice.lang.startsWith('en') && 
-          !voice.name.toLowerCase().includes('female')
-        );
-        if (englishVoice) {
-          utterance.voice = englishVoice;
-        }
-      }
-    } else if (avatarName === 'daisy') {
-      // Daisy - energetic, younger female voice
-      utterance.rate = 1.05; // Slightly faster
-      utterance.pitch = 1.3; // Higher pitch for younger sound
-      utterance.volume = 1.0;
-      
-      // Try to find an energetic female voice
-      const daisyVoice = voices.find(voice => 
-        voice.name.toLowerCase().includes('samantha') ||
-        voice.name.toLowerCase().includes('kate') ||
-        voice.name.toLowerCase().includes('emma') ||
-        voice.name.toLowerCase().includes('fiona') ||
-        voice.name.toLowerCase().includes('google uk english female')
-      );
-      
-      if (daisyVoice) {
-        utterance.voice = daisyVoice;
-      } else {
-        // Fallback to any female voice
-        const femaleVoice = voices.find(voice => 
-          voice.name.toLowerCase().includes('female') ||
-          voice.lang.startsWith('en')
-        );
-        if (femaleVoice) {
-          utterance.voice = femaleVoice;
-        }
-      }
-    } else {
-      // Sarah - warm, professional female voice (default)
-      utterance.rate = 0.95;
-      utterance.pitch = 1.15; // Moderate pitch
-      utterance.volume = 1.0;
-      
-      // Try to find a professional female voice
-      const sarahVoice = voices.find(voice => 
-        voice.name.toLowerCase().includes('victoria') ||
-        voice.name.toLowerCase().includes('karen') ||
-        voice.name.toLowerCase().includes('susan') ||
-        voice.name.toLowerCase().includes('zira') ||
-        voice.name.toLowerCase().includes('hazel') ||
-        voice.name.toLowerCase().includes('google us english female')
-      );
-      
-      if (sarahVoice) {
-        utterance.voice = sarahVoice;
-      } else {
-        // Fallback to any English voice
-        const englishVoice = voices.find(voice => 
-          voice.lang.startsWith('en')
-        );
-        if (englishVoice) {
-          utterance.voice = englishVoice;
-        }
-      }
-    }
-    
-    utterance.onend = () => {
-      setAvatarSpeaking(false);
-      resolve(true);
-    };
-    
-    utterance.onerror = (error) => {
-      console.error('TTS error:', error);
-      setAvatarSpeaking(false);
-      resolve(false);
-    };
-    
-    window.speechSynthesis.speak(utterance);
-  });
-}
-
-// Load voices (needed for browser TTS)
+// Function to preload voices
 export function loadVoices() {
-  return new Promise((resolve) => {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    return window.speechSynthesis.getVoices();
+  }
+  return [];
+}
+
+// Voice configuration: John = male voices, Sarah & Daisy = female voices
+const voiceMapping = {
+  john: {
+    en: { lang: 'en-US', gender: 'male', preferredNames: ['Google US English Male', 'Microsoft David - English (United States)', 'Alex', 'Daniel'] },
+    tl: { lang: 'fil-PH', gender: 'male', preferredNames: ['Google Filipino (Philippines) Male', 'Google Filipino Male', 'Microsoft Filipino Male'] },
+    zh: { lang: 'zh-CN', gender: 'male', preferredNames: ['Google 普通话（中国大陆）Male', 'Microsoft Yunyang - Chinese (Mainland)', 'Kangkang'] },
+    ja: { lang: 'ja-JP', gender: 'male', preferredNames: ['Google 日本語 Male', 'Microsoft Ichiro - Japanese (Japan)', 'Otoya'] },
+    ko: { lang: 'ko-KR', gender: 'male', preferredNames: ['Google 한국의 Male', 'Microsoft Korean Male', 'Minsu'] }
+  },
+  sarah: {
+    en: { lang: 'en-US', gender: 'female', preferredNames: ['Google US English Female', 'Microsoft Zira - English (United States)', 'Samantha', 'Victoria'] },
+    tl: { lang: 'fil-PH', gender: 'female', preferredNames: ['Google Filipino (Philippines) Female', 'Google Filipino Female', 'Microsoft Filipino Female', 'Rosa'] },
+    zh: { lang: 'zh-CN', gender: 'female', preferredNames: ['Google 普通话（中国大陆）Female', 'Microsoft Huihui - Chinese (Simplified, PRC)', 'Yaoyao'] },
+    ja: { lang: 'ja-JP', gender: 'female', preferredNames: ['Google 日本語 Female', 'Microsoft Ayumi - Japanese (Japan)', 'Kyoko'] },
+    ko: { lang: 'ko-KR', gender: 'female', preferredNames: ['Google 한국의 Female', 'Microsoft Heami - Korean (Korea)', 'Yuna'] }
+  },
+  daisy: {
+    en: { lang: 'en-US', gender: 'female', preferredNames: ['Google US English Female', 'Microsoft Zira - English (United States)', 'Samantha', 'Victoria'] },
+    tl: { lang: 'fil-PH', gender: 'female', preferredNames: ['Google Filipino (Philippines) Female', 'Google Filipino Female', 'Microsoft Filipino Female', 'Rosa'] },
+    zh: { lang: 'zh-CN', gender: 'female', preferredNames: ['Google 普通话（中国大陆）Female', 'Microsoft Huihui - Chinese (Simplified, PRC)', 'Yaoyao'] },
+    ja: { lang: 'ja-JP', gender: 'female', preferredNames: ['Google 日本語 Female', 'Microsoft Ayumi - Japanese (Japan)', 'Kyoko'] },
+    ko: { lang: 'ko-KR', gender: 'female', preferredNames: ['Google 한국의 Female', 'Microsoft Heami - Korean (Korea)', 'Yuna'] }
+  }
+};
+
+function selectVoice(avatar, language) {
+  const voices = window.speechSynthesis.getVoices();
+  const config = voiceMapping[avatar]?.[language] || voiceMapping[avatar]?.en;
+  
+  if (!config) {
+    console.warn(`No voice config for avatar: ${avatar}, language: ${language}`);
+    return null;
+  }
+
+  // First, try to find exact preferred voice names
+  for (const preferredName of config.preferredNames) {
+    const exactMatch = voices.find(voice => 
+      voice.name.includes(preferredName) || voice.voiceURI.includes(preferredName)
+    );
+    if (exactMatch) {
+      console.log(`✓ Found preferred voice: ${exactMatch.name}`);
+      return exactMatch;
+    }
+  }
+
+  // Filter by language and gender with improved detection
+  const filteredVoices = voices.filter(voice => {
+    const matchesLang = voice.lang.startsWith(config.lang.split('-')[0]);
+    const voiceName = voice.name.toLowerCase();
+    const voiceURI = voice.voiceURI.toLowerCase();
+    
+    // Enhanced gender detection with more specific patterns
+    // Female voice indicators
+    const isFemale = voiceName.includes('female') || 
+                     voiceURI.includes('female') ||
+                     ['zira', 'samantha', 'karen', 'moira', 'ayumi', 'huihui', 'heami', 
+                      'kyoko', 'yuna', 'yaoyao', 'rosa', 'victoria'].some(name => 
+                       voiceName.includes(name) || voiceURI.includes(name)
+                     );
+    
+    // Male voice indicators - explicitly exclude female voices
+    const isMale = !isFemale && (
+                   voiceName.includes('male') || 
+                   voiceURI.includes('male') ||
+                   ['david', 'alex', 'daniel', 'ichiro', 'yunyang', 'otoya', 'minsu', 'kangkang'].some(name => 
+                     voiceName.includes(name) || voiceURI.includes(name)
+                   ));
+    
+    const matchesGender = config.gender === 'female' ? isFemale : isMale;
+    
+    return matchesLang && matchesGender;
+  });
+
+  if (filteredVoices.length > 0) {
+    console.log(`✓ Found ${config.gender} voice for ${config.lang}: ${filteredVoices[0].name}`);
+    return filteredVoices[0];
+  }
+
+  // Fallback: just match language, then strictly filter by gender
+  const langVoices = voices.filter(voice => voice.lang.startsWith(config.lang.split('-')[0]));
+  
+  if (langVoices.length > 0) {
+    const genderFilteredFallback = langVoices.filter(voice => {
+      const name = voice.name.toLowerCase();
+      const uri = voice.voiceURI.toLowerCase();
+      
+      if (config.gender === 'female') {
+        // Must have female indicator OR not have male indicator
+        return name.includes('female') || uri.includes('female') || 
+               (!name.includes('male') && !uri.includes('male'));
+      } else {
+        // Must have male indicator AND not have female indicator
+        return (name.includes('male') || uri.includes('male')) && 
+               !name.includes('female') && !uri.includes('female');
+      }
+    });
+    
+    const fallbackVoice = genderFilteredFallback[0] || langVoices[0];
+    console.log(`⚠ Using fallback voice: ${fallbackVoice.name}`);
+    return fallbackVoice;
+  }
+
+  // Last resort: use any default voice
+  console.warn(`⚠ No suitable voice found, using default`);
+  return voices[0] || null;
+}
+
+export function textToSpeech(text, interrupt = false, avatar = 'sarah', language = 'en') {
+  return new Promise((resolve, reject) => {
+    if (!('speechSynthesis' in window)) {
+      console.error('Speech synthesis not supported');
+      reject(new Error('Speech synthesis not supported'));
+      return;
+    }
+
+    if (interrupt) {
+      window.speechSynthesis.cancel();
+      isCurrentlySpeaking = false;
+    }
+
+    if (isCurrentlySpeaking && !interrupt) {
+      console.log('Already speaking, queuing...');
+    }
+
+    // Ensure voices are loaded
     let voices = window.speechSynthesis.getVoices();
-    if (voices.length) {
-      resolve(voices);
-    } else {
-      window.speechSynthesis.onvoiceschanged = () => {
+    if (voices.length === 0) {
+      window.speechSynthesis.addEventListener('voiceschanged', () => {
         voices = window.speechSynthesis.getVoices();
-        resolve(voices);
+        speakText();
+      }, { once: true });
+    } else {
+      speakText();
+    }
+
+    function speakText() {
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      const selectedVoice = selectVoice(avatar, language);
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+        utterance.lang = selectedVoice.lang;
+      } else {
+        const config = voiceMapping[avatar]?.[language] || voiceMapping[avatar]?.en;
+        utterance.lang = config?.lang || 'en-US';
+      }
+
+      // Adjust speech parameters for better quality
+      utterance.rate = 1.0;
+      utterance.pitch = avatar === 'john' ? 0.9 : 1.1; // Lower pitch for John, higher for Sarah/Daisy
+      utterance.volume = 1.0;
+
+      utterance.onstart = () => {
+        isCurrentlySpeaking = true;
+        console.log(`🔊 Speaking as ${avatar} in ${language}: "${text.substring(0, 50)}..."`);
       };
+
+      utterance.onend = () => {
+        isCurrentlySpeaking = false;
+        resolve();
+      };
+
+      utterance.onerror = (event) => {
+        console.error('Speech error:', event);
+        isCurrentlySpeaking = false;
+        reject(event);
+      };
+
+      window.speechSynthesis.speak(utterance);
     }
   });
 }
 
-// Get phoneme data for lip sync (simplified version)
-export function getPhonemeData(text) {
-  // Simplified phoneme mapping for basic lip sync
-  const words = text.toLowerCase().split(' ');
-  const phonemes = [];
-  
-  words.forEach((word, index) => {
-    const timeOffset = index * 0.3; // Approximate time per word
-    
-    // Map common sounds to mouth shapes
-    if (word.match(/[aeiou]/)) {
-      phonemes.push({ time: timeOffset, shape: 'open' });
-    }
-    if (word.match(/[mn]/)) {
-      phonemes.push({ time: timeOffset + 0.1, shape: 'closed' });
-    }
-    if (word.match(/[fv]/)) {
-      phonemes.push({ time: timeOffset + 0.15, shape: 'tight' });
-    }
+export function stopSpeaking() {
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    isCurrentlySpeaking = false;
+  }
+}
+
+// Initialize voices on load
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.addEventListener('voiceschanged', () => {
+    const voices = window.speechSynthesis.getVoices();
+    console.log('✓ Voices loaded:', voices.length);
   });
-  
-  return phonemes;
 }

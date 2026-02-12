@@ -8,7 +8,6 @@ import { getAIResponse, getScriptedResponse, routeToAvatar } from './utils/gemin
 import { textToSpeech, setAvatarSpeaking } from './utils/speechAPI';
 
 function App() {
-  // Separate message history for each avatar
   const [conversationHistory, setConversationHistory] = useState({
     sarah: [],
     daisy: [],
@@ -20,10 +19,9 @@ function App() {
   const [avatarEmotion, setAvatarEmotion] = useState('happy');
   const [currentSpokenText, setCurrentSpokenText] = useState('');
   const [activeAvatar, setActiveAvatar] = useState('sarah');
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
   const hasGreeted = useRef(false);
-  const hasInitialized = useRef(false);
 
-  // Avatar configurations
   const avatarConfigs = {
     sarah: {
       name: 'Sarah',
@@ -48,6 +46,22 @@ function App() {
     }
   };
 
+  const languages = {
+    en: { name: 'English', flag: '🇺🇸' },
+    tl: { name: 'Filipino', flag: '🇵🇭' },
+    zh: { name: 'Chinese', flag: '🇨🇳' },
+    ja: { name: 'Japanese', flag: '🇯🇵' },
+    ko: { name: 'Korean', flag: '🇰🇷' }
+  };
+
+  const welcomeMessages = {
+    en: 'Hello! Welcome to Hotel Rafaela. I\'m your host assistant. How may I assist you today?',
+    tl: 'Kumusta! Maligayang pagdating sa Hotel Rafaela. Ako ang inyong host assistant. Paano kita matutulungan ngayon?',
+    zh: '你好！欢迎来到拉法埃拉酒店。今天我能为您做些什么？',
+    ja: 'こんにちは！ホテルラファエラへようこそ。今日は何をお手伝いできますか？',
+    ko: '안녕하세요! 호텔 라파엘라에 오신 것을 환영합니다. 오늘 무엇을 도와드릴까요?'
+  };
+
   useEffect(() => {
     if (hasGreeted.current) return;
     hasGreeted.current = true;
@@ -55,7 +69,7 @@ function App() {
     const welcomeMessage = {
       sender: 'ai',
       avatar: 'sarah',
-      text: 'Hello! Welcome to Hotel Rafaela. I\'m Sarah, your host assistant. I can help with general information, facilities, and directions. For bookings, Daisy is here to assist. For support, John is ready to help. How may I assist you today?',
+      text: welcomeMessages[selectedLanguage],
       context: null
     };
     
@@ -93,36 +107,34 @@ function App() {
     setAvatarSpeaking(true);
     
     try {
-      // UPDATED: Pass avatar name as third parameter
-      await textToSpeech(text, true, avatar);
+      // Wait for actual speech to complete - no manual timing!
+      await textToSpeech(text, false, avatar, selectedLanguage);
       
-      const wordsPerSecond = 2.5;
-      const words = text.split(' ').length;
-      const speakDuration = (words / wordsPerSecond) * 1000;
+      // Stop animation immediately when speech ends
+      setIsAvatarAnimating(false);
+      setCurrentSpokenText('');
+      setAvatarSpeaking(false);
       
-      setTimeout(() => {
-        setIsAvatarAnimating(false);
-        setCurrentSpokenText('');
-        setAvatarSpeaking(false);
-      }, speakDuration);
     } catch (error) {
       console.error('Speech error:', error);
-      const speakDuration = Math.min(text.length * 50, 5000);
+      // Fallback: stop after reasonable time if speech fails
       setTimeout(() => {
         setIsAvatarAnimating(false);
         setCurrentSpokenText('');
         setAvatarSpeaking(false);
-      }, speakDuration);
+      }, 3000);
     }
   };
 
   const handleSendMessage = async (userMessage) => {
     if (isProcessing || !userMessage.trim()) return;
 
-    // Route message to appropriate avatar
+    // Route to the correct avatar based on trigger words
     const assignedAvatar = routeToAvatar(userMessage);
     
-    // Switch to the assigned avatar
+    console.log(`Message: "${userMessage}" → Routed to: ${assignedAvatar}`);
+    
+    // IMPORTANT: Switch to the assigned avatar BEFORE processing
     if (assignedAvatar !== activeAvatar) {
       setActiveAvatar(assignedAvatar);
     }
@@ -133,7 +145,6 @@ function App() {
       context: userContext
     };
     
-    // Add user message to the assigned avatar's conversation
     setConversationHistory(prev => ({
       ...prev,
       [assignedAvatar]: [...prev[assignedAvatar], userMsg]
@@ -142,11 +153,11 @@ function App() {
     setIsProcessing(true);
 
     try {
-      // Get scripted or AI response
-      let aiResponse = getScriptedResponse(userMessage, assignedAvatar);
+      // Pass language parameter to get responses in the correct language
+      let aiResponse = getScriptedResponse(userMessage, assignedAvatar, selectedLanguage);
       
       if (!aiResponse) {
-        aiResponse = await getAIResponse(userMessage, userContext || {}, assignedAvatar);
+        aiResponse = await getAIResponse(userMessage, userContext || {}, assignedAvatar, selectedLanguage);
       }
 
       const aiMsg = {
@@ -156,17 +167,26 @@ function App() {
         context: null
       };
       
-      // Add AI response to the assigned avatar's conversation
       setConversationHistory(prev => ({
         ...prev,
         [assignedAvatar]: [...prev[assignedAvatar], aiMsg]
       }));
 
+      // Make sure to speak with the correct avatar
       await handleAvatarSpeak(aiResponse, assignedAvatar);
 
     } catch (error) {
       console.error('Error:', error);
-      const errorMessage = 'I apologize for the inconvenience. Could you please try again?';
+      
+      const errorMessages = {
+        en: 'I apologize for the inconvenience. Could you please try again?',
+        tl: 'Paumanhin sa abala. Maaari mo bang subukan muli?',
+        zh: '很抱歉给您带来不便。您能再试一次吗？',
+        ja: 'ご不便をおかけして申し訳ございません。もう一度お試しいただけますか？',
+        ko: '불편을 드려 죄송합니다. 다시 시도해 주시겠습니까?'
+      };
+      
+      const errorMessage = errorMessages[selectedLanguage] || errorMessages.en;
       
       const errorMsg = {
         sender: 'ai',
@@ -187,17 +207,25 @@ function App() {
   };
 
   const handleAvatarSwitch = (avatarKey) => {
-    if (avatarKey === activeAvatar) return; // Don't greet if already active
+    if (avatarKey === activeAvatar) return;
     
     setActiveAvatar(avatarKey);
     
-    // Only greet if this avatar hasn't been greeted yet
     if (conversationHistory[avatarKey].length === 0) {
       const config = avatarConfigs[avatarKey];
+      
+      const switchMessages = {
+        en: `Hi! I'm ${config.name}, your ${config.role}. I specialize in ${config.responsibilities}. How can I help you?`,
+        tl: `Kumusta! Ako si ${config.name}, ang iyong ${config.role}. Dalubhasa ako sa ${config.responsibilities}. Paano kita matutulungan?`,
+        zh: `你好！我是${config.name}，您的${config.role}。我专门负责${config.responsibilities}。我能帮您什么？`,
+        ja: `こんにちは！私は${config.name}、あなたの${config.role}です。${config.responsibilities}を専門としています。何かお手伝いできますか？`,
+        ko: `안녕하세요! 저는 ${config.name}, 귀하의 ${config.role}입니다. ${config.responsibilities}를 전문으로 합니다. 무엇을 도와드릴까요?`
+      };
+      
       const switchMessage = {
         sender: 'ai',
         avatar: avatarKey,
-        text: `Hi! I'm ${config.name}, your ${config.role}. I specialize in ${config.responsibilities}. How can I help you?`,
+        text: switchMessages[selectedLanguage] || switchMessages.en,
         context: null
       };
       
@@ -210,7 +238,24 @@ function App() {
     }
   };
 
-  // Get current avatar's messages
+  const handleLanguageChange = (langCode) => {
+    setSelectedLanguage(langCode);
+    
+    const greetMessage = {
+      sender: 'ai',
+      avatar: activeAvatar,
+      text: `Language changed to ${languages[langCode].name}. ${welcomeMessages[langCode]}`,
+      context: null
+    };
+    
+    setConversationHistory(prev => ({
+      ...prev,
+      [activeAvatar]: [...prev[activeAvatar], greetMessage]
+    }));
+    
+    handleAvatarSpeak(greetMessage.text, activeAvatar);
+  };
+
   const currentMessages = conversationHistory[activeAvatar];
 
   return (
@@ -221,10 +266,24 @@ function App() {
             <div className="logo-icon">🏠︎</div>
             <div className="header-text">
               <h1>Hotel Rafaela Smart Service</h1>
-              <p className="header-subtitle">Multi-Avatar Service</p>
+              <p className="header-subtitle">Multi-Avatar • Multi-Language Service</p>
             </div>
           </div>
           <div className="header-status">
+            <div className="language-selector">
+              <span className="language-label">Language</span>
+              <select 
+                value={selectedLanguage}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                className="language-select"
+              >
+                {Object.entries(languages).map(([code, lang]) => (
+                  <option key={code} value={code}>
+                    {lang.flag} {lang.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="status-indicator online">
               <span className="status-dot"></span>
               <span>All Assistants Online</span>
@@ -281,10 +340,11 @@ function App() {
           </div>
 
           <div className="panel-section">
-            <h2 className="panel-title"> ၊၊||၊ Voice Control</h2>
+            <h2 className="panel-title">၊၊||၊ Voice Control</h2>
             <VoiceControl
               onTranscript={handleVoiceTranscript}
               onResponse={(text) => console.log('Avatar spoke:', text)}
+              selectedLanguage={selectedLanguage}
             />
           </div>
 
@@ -316,7 +376,7 @@ function App() {
                 </div>
                 <div>
                   <h2>{avatarConfigs[activeAvatar].name} - {avatarConfigs[activeAvatar].role}</h2>
-                  <p className="avatar-role">{avatarConfigs[activeAvatar].responsibilities}</p>
+                  <p className="avatar-role">{avatarConfigs[activeAvatar].responsibilities} • {languages[selectedLanguage].name}</p>
                 </div>
               </div>
               {isProcessing && (
@@ -345,13 +405,14 @@ function App() {
             messages={currentMessages} 
             onSendMessage={handleSendMessage}
             avatarConfigs={avatarConfigs}
+            currentLanguage={selectedLanguage}
           />
         </aside>
       </div>
 
       <footer className="app-footer">
         <div className="footer-content">
-          <p>Powered by AI • 3 Specialized Avatars • Emotion Detection • Voice • Lip Sync</p>
+          <p>Powered by AI • 3 Specialized Avatars • 5 Languages • Emotion Detection • Voice • Facial Expressions</p>
         </div>
       </footer>
     </div>

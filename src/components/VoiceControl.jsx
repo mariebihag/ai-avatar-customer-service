@@ -2,11 +2,20 @@ import { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff } from 'lucide-react';
 import { getAvatarSpeaking, loadVoices } from '../utils/speechAPI';
 
-function VoiceControl({ onTranscript }) {
+function VoiceControl({ onTranscript, selectedLanguage = 'en' }) {
   const [isListening, setIsListening] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const recognitionRef = useRef(null);
+
+  // Language codes for speech recognition
+  const languageCodes = {
+    en: 'en-US',
+    tl: 'fil-PH',
+    zh: 'zh-CN',
+    ja: 'ja-JP',
+    ko: 'ko-KR'
+  };
 
   // Watchdog: If AI starts talking, kill the mic immediately
   useEffect(() => {
@@ -25,7 +34,7 @@ function VoiceControl({ onTranscript }) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      recognition.lang = languageCodes[selectedLanguage] || 'en-US';
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -54,18 +63,45 @@ function VoiceControl({ onTranscript }) {
         }
       };
 
-      recognition.onend = () => setIsListening(false);
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setTranscriptionStatus(`⚠️ Error: ${event.error}`);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        setTranscriptionStatus('');
+      };
+
       recognitionRef.current = recognition;
+    } else {
+      setTranscriptionStatus('⚠️ Speech recognition not supported');
     }
-  }, [onTranscript]);
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [onTranscript, selectedLanguage]);
 
   const startListening = () => {
-    if (!getAvatarSpeaking()) recognitionRef.current?.start();
+    if (!getAvatarSpeaking() && recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+      } catch (error) {
+        console.error('Failed to start recognition:', error);
+      }
+    }
   };
 
   const stopListening = () => {
-    recognitionRef.current?.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
     setIsListening(false);
+    setInterimTranscript('');
   };
 
   return (
@@ -81,9 +117,15 @@ function VoiceControl({ onTranscript }) {
         disabled={getAvatarSpeaking()}
       >
         {isListening ? (
-          <><Mic size={24} className="pulse" /><span>Listening...</span></>
+          <>
+            <Mic size={24} className="pulse" />
+            <span>Listening...</span>
+          </>
         ) : (
-          <><MicOff size={24} /><span>{getAvatarSpeaking() ? 'AI Speaking...' : 'Click to Speak'}</span></>
+          <>
+            <MicOff size={24} />
+            <span>{getAvatarSpeaking() ? 'AI Speaking...' : 'Click to Speak'}</span>
+          </>
         )}
       </button>
 
